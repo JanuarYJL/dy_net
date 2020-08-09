@@ -36,7 +36,7 @@ public:
         size_ = length;
     }
 
-    ~buffer()
+    virtual ~buffer()
     {
 
     }
