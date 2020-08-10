@@ -27,6 +27,7 @@ public:
     {
         data_.reserve(default_size);
         size_ = 0;
+        curr_ = 0;
     }
 
     buffer(const char* data, const size_type& length)
@@ -34,6 +35,7 @@ public:
         data_.reserve(default_size > length ? default_size : length);
         memcpy(const_cast<char*>(data_.data()), data, length);
         size_ = length;
+        curr_ = 0;
     }
 
     virtual ~buffer()
@@ -43,7 +45,7 @@ public:
 
     const char* data() const
     {
-        return data_.data();
+        return data_.data() + curr_;
     }
 
     const size_type& size() const
@@ -56,18 +58,30 @@ public:
         size_ = size;
     }
 
+    void pop_cache(const size_type& size)
+    {
+        curr_ += size;
+    }
+
     char* writable_buff()
     {
-        if (data_.capacity() <= size_)
+        if (data_.capacity() <= curr_ + size_)
         {
-            expand();
+            if (curr_ >= per_alloc_size)
+            {
+                move2head(curr_);
+            }
+            else
+            {
+                expand();
+            }
         }
-        return const_cast<char*>(data_.data() + size_);
+        return const_cast<char*>(data_.data() + curr_ + size_);
     }
 
     size_type writable_size()
     {
-        return data_.capacity() - size_;
+        return data_.capacity() - curr_ - size_;
     }
 
     void move2head(const size_type& off_pos)
@@ -79,35 +93,35 @@ public:
         if (off_pos >= size_)
         {
             size_ = 0;
+            curr_ = 0;
         }
         else // there is no off_pos == 0
         {
             size_ = size_ - off_pos;
-            memmove(mut_data(), data() + off_pos, size_);
+            curr_ = 0;
+            memmove(const_cast<char*>(data_.data()), data() + off_pos, size_);
         }
     }
 
 protected:
-    char* mut_data()
-    {
-        return const_cast<char*>(data_.data());
-    }
     void expand()
     {
         data_.reserve(data_.capacity() + per_alloc_size);
     }
     void shrink()
     {
+        move2head(curr_);
         data_.reserve(std::max<size_type>(default_size, (size_ + per_alloc_size - 1) / per_alloc_size * per_alloc_size));
     }
 
 protected:
     data_type data_;
-    size_type size_;
+    size_type curr_;  // 数据位置
+    size_type size_;  // 数据长度
 };
 
 
 } // namespace net
 } // namespace dy
 
-#endif DY_NET_BUFFER_H
+#endif

@@ -21,7 +21,7 @@ add_definitions(
 )
 
 # third_party
-set(THIRD_PARTY_PATH ../third_party)
+set(THIRD_PARTY_PATH /home/yangjl/workspace/third_party)
 
 # 包含路径
 include_directories(
@@ -42,3 +42,6 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_SOURCE_DIR}/bin/release)
 
 # library
 add_library(dy_net ${DY_NET_SRC_FILES})
+
+
+add_subdirectory(test)
