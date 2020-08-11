@@ -17,22 +17,23 @@ public:
     using buff_type = std::string;
     using size_type = buff_type::size_type;
 
-    enum constant: size_type
+    enum constant : size_type
     {
-        default_size = 32 * 1024,
-        per_alloc_size = 32 * 1024,
+        max_pack_size  = 4 * 1024 * 1024,   //  4M
+        initial_size   = 32 * 1024,         // 32K
+        per_alloc_size = 32 * 1024,         // 32K
     };
-    
+
     buffer()
     {
-        container_.resize(constant::default_size);
+        container_.resize(constant::initial_size);
         size_ = 0;
         offset_ = 0;
     }
 
     buffer(const char* data, const size_type& length)
     {
-        container_.resize(constant::default_size > length ? constant::default_size : length);
+        container_.resize(constant::initial_size > length ? constant::initial_size : length);
         memcpy(const_cast<char*>(container_.data()), data, length);
         size_ = length;
         offset_ = 0;
@@ -102,7 +103,7 @@ protected:
     void shrink()
     {
         move2head();
-        container_.resize(std::max<size_type>(constant::default_size, (size_ + constant::per_alloc_size - 1) / constant::per_alloc_size * constant::per_alloc_size));
+        container_.resize(std::max<size_type>(constant::initial_size, (size_ + constant::per_alloc_size - 1) / constant::per_alloc_size * constant::per_alloc_size));
     }
 
 protected:

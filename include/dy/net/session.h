@@ -51,7 +51,6 @@ public:
 
     virtual ~session()
     {
-        std::cout << __FUNCTION__ << std::endl;
     }
 
     virtual void start() = 0;
@@ -124,7 +123,6 @@ public:
 
     virtual ~socket_session()
     {
-        std::cout << __FUNCTION__ << std::endl;
     }
 
     void set_options(const int& send_timeout = 30, const int& recv_timeout = 30, const int& heartbeat_interval = 10, const std::string& heartbeat_data = "")
@@ -162,13 +160,13 @@ public:
 
     int async_send(const char* data, const buffer::size_type& length)
     {
-        if (!data || length == 0 /*|| length > max_packet_length*/)
+        if (!data || length == 0 || length > buffer::constant::max_pack_size)
         {
-            return common::error_bad_data;
+            return common::error_code::normal_error;
         }
         if (stopped())
         {
-            return common::error_session_stopped;
+            return common::error_code::session_stopped;
         }
         lock_guard_type lk(mutex_);
         if (send_queue_capacity_ == 0 || send_queue_.size() < send_queue_capacity_)
@@ -176,11 +174,11 @@ public:
             send_queue_.emplace(std::make_shared<buffer>(data, length));
             non_empty_send_queue_.expires_at(time_point_type::min());
 
-            return common::success_code;
+            return common::error_code::ok;
         }
         else
         {
-            return common::error_queue_full;
+            return common::error_code::queue_full;
         }
     }
 
@@ -254,29 +252,19 @@ private:
                 // 更新接收缓存有效长度
                 recv_buffer_.set_size(recv_buffer_.size() + bytes_transferred);
 
-                {
-                    std::string buff(recv_buffer_.data(), recv_buffer_.size());
-                    std::cout << __FUNCTION__ << " recv_buffer_.size=" << recv_buffer_.size() << " ";
-                    for (net::buffer::size_type i = 0; i < buff.length(); ++i)
-                    {
-                        std::cout << buff[i] << " ";
-                    }
-                    std::cout << std::endl;
-                }
-
                 while (true)
                 {
                     // 解析接收缓存数据
-                    int parse_type = 0;
-                    int parse_result = 0;
-                    std::tie(parse_result, parse_type) = func_pack_parse_method_(recv_buffer_);
-                    if (parse_result == common::error_packet_bad)
+                    int pack_type = 0;
+                    int pack_size = 0;
+                    std::tie(pack_size, pack_type) = func_pack_parse_method_(recv_buffer_);
+                    if (pack_size == common::error_code::packet_error)
                     {
                         // 解包异常 停止
-                        handle_stop(common::error_packet_bad, "parse error");
+                        handle_stop(common::error_code::packet_error, "parse error");
                         break;
                     }
-                    else if (parse_result == common::error_packet_less)
+                    else if (pack_size == common::error_code::packet_less)
                     {
                         // 整理缓存 继续解包
                         recv_buffer_.move2head();
@@ -289,9 +277,9 @@ private:
                         // 将解析出的包回调给业务层
                         if (func_receive_callback_)
                         {
-                            func_receive_callback_(session_id(), parse_type, recv_buffer_.data(), parse_result);
+                            func_receive_callback_(session_id(), pack_type, recv_buffer_.data(), pack_size);
                         }
-                        recv_buffer_.pop_cache(parse_result);
+                        recv_buffer_.pop_cache(pack_size);
                     }
                 }
             }
@@ -305,30 +293,32 @@ private:
 
     void handle_send()
     {
-        if (!stopped())
+        if (stopped())
         {
-            lock_guard_type lk(mutex_);
-            if (send_queue_.empty())
+            return;
+        }
+
+        lock_guard_type lk(mutex_);
+        if (send_queue_.empty())
+        {
+            // 无数据时挂起等待数据
+            non_empty_send_queue_.expires_at(time_point_type::max());
+            non_empty_send_queue_.async_wait(std::bind(&socket_session<TSocket, TBuffer>::handle_send, std::dynamic_pointer_cast<socket_session<TSocket, TBuffer>>(shared_from_this())));
+            // 设置心跳定时器
+            if (heartbeat_interval_ > 0 && !heartbeat_data_.empty())
             {
-                // 无数据时挂起等待数据
-                non_empty_send_queue_.expires_at(time_point_type::max());
-                non_empty_send_queue_.async_wait(std::bind(&socket_session<TSocket, TBuffer>::handle_send, std::dynamic_pointer_cast<socket_session<TSocket, TBuffer>>(shared_from_this())));
-                // 设置心跳定时器
-                if (heartbeat_interval_ > 0 && !heartbeat_data_.empty())
-                {
-                    heartbeat_timer_.expires_after(asio::chrono::seconds(heartbeat_interval_));
-                    heartbeat_timer_.async_wait(std::bind(&socket_session<TSocket, TBuffer>::check_heartbeat, std::dynamic_pointer_cast<socket_session<TSocket, TBuffer>>(shared_from_this())));
-                }
+                heartbeat_timer_.expires_after(asio::chrono::seconds(heartbeat_interval_));
+                heartbeat_timer_.async_wait(std::bind(&socket_session<TSocket, TBuffer>::check_heartbeat, std::dynamic_pointer_cast<socket_session<TSocket, TBuffer>>(shared_from_this())));
             }
-            else
+        }
+        else
+        {
+            // 发送数据
+            if (send_timeout_ > 0)
             {
-                // 发送数据
-                if (send_timeout_ > 0)
-                {
-                    send_deadline_.expires_after(asio::chrono::seconds(send_timeout_));
-                }
-                async_send();
+                send_deadline_.expires_after(asio::chrono::seconds(send_timeout_));
             }
+            async_send();
         }
     }
 
@@ -353,37 +343,37 @@ private:
 
     void check_deadline(timer_type &deadline)
     {
-        std::cout << __FUNCTION__ << std::endl;
-        if (!stopped())
+        if (stopped())
         {
-            if (deadline.expiry() <= timer_type::clock_type::now())
+            return;
+        }
+        if (deadline.expiry() <= timer_type::clock_type::now())
+        {
+            // 超时 不调用handle_stop() 关闭socket由接收发送响应来调用关闭
+            lock_guard_type guard(mutex_);
+            if (socket_.is_open())
             {
-                // 超时 不调用handle_stop() 关闭socket由接收发送响应来调用关闭
-                lock_guard_type guard(mutex_);
-                if (socket_.is_open())
-                {
-                    boost::system::error_code ec;
-                    socket_.close(ec);
-                }
+                boost::system::error_code ec;
+                socket_.close(ec);
             }
-            else
-            {
-                // 挂起 继续
-                deadline.async_wait(std::bind(&socket_session<TSocket, TBuffer>::check_deadline, std::dynamic_pointer_cast<socket_session<TSocket, TBuffer>>(shared_from_this()), std::ref(deadline)));
-            }
+        }
+        else
+        {
+            // 挂起 继续
+            deadline.async_wait(std::bind(&socket_session<TSocket, TBuffer>::check_deadline, std::dynamic_pointer_cast<socket_session<TSocket, TBuffer>>(shared_from_this()), std::ref(deadline)));
         }
     }
 
     void check_heartbeat()
     {
-        std::cout << __FUNCTION__ << std::endl;
-        if (!stopped())
+        if (stopped())
         {
-            if (heartbeat_timer_.expiry() <= timer_type::clock_type::now())
-            {
-                // 超时 发送心跳
-                async_send(heartbeat_data_.c_str(), heartbeat_data_.length());
-            }
+            return;
+        }
+        if (heartbeat_timer_.expiry() <= timer_type::clock_type::now())
+        {
+            // 超时 发送心跳
+            async_send(heartbeat_data_.c_str(), heartbeat_data_.length());
         }
     }
 };

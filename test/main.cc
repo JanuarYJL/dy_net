@@ -41,17 +41,17 @@ std::tuple<net::buffer::size_type, int> pack_parse(const net::buffer& buf)
             }
             else
             {
-                return std::make_tuple(common::error_packet_less, 0);
+                return std::make_tuple(common::error_code::packet_less, 0);
             }
         }
         else
         {
-            return std::make_tuple(common::error_packet_bad, 0);
+            return std::make_tuple(common::error_code::packet_error, 0);
         }
     }
     else
     {
-        return std::make_tuple(common::error_packet_less, 0);
+        return std::make_tuple(common::error_code::packet_less, 0);
     }
 }
 
