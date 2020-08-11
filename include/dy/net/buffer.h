@@ -14,8 +14,8 @@ namespace net
 class buffer
 {
 public:
-    using data_type = std::string;
-    using size_type = std::size_t;
+    using buff_type = std::string;
+    using size_type = buff_type::size_type;
 
     enum constant: size_type
     {
@@ -25,27 +25,27 @@ public:
     
     buffer()
     {
-        data_.reserve(default_size);
+        container_.resize(constant::default_size);
         size_ = 0;
-        curr_ = 0;
+        offset_ = 0;
     }
 
     buffer(const char* data, const size_type& length)
     {
-        data_.reserve(default_size > length ? default_size : length);
-        memcpy(const_cast<char*>(data_.data()), data, length);
+        container_.resize(constant::default_size > length ? constant::default_size : length);
+        memcpy(const_cast<char*>(container_.data()), data, length);
         size_ = length;
-        curr_ = 0;
+        offset_ = 0;
     }
 
     virtual ~buffer()
     {
-
+        // nothing
     }
 
     const char* data() const
     {
-        return data_.data() + curr_;
+        return container_.data() + offset_;
     }
 
     const size_type& size() const
@@ -60,64 +60,55 @@ public:
 
     void pop_cache(const size_type& size)
     {
-        curr_ += size;
+        offset_ += size;
+        size_ -= size;
     }
 
     char* writable_buff()
     {
-        if (data_.capacity() <= curr_ + size_)
+        if (container_.size() <= offset_ + size_)
         {
-            if (curr_ >= per_alloc_size)
+            // 偏移量大于一次申请长度时移动否则扩容
+            if (offset_ >= constant::per_alloc_size)
             {
-                move2head(curr_);
+                move2head();
             }
             else
             {
                 expand();
             }
         }
-        return const_cast<char*>(data_.data() + curr_ + size_);
+        return const_cast<char*>(container_.data() + offset_ + size_);
     }
 
     size_type writable_size()
     {
-        return data_.capacity() - curr_ - size_;
+        return container_.size() - offset_ - size_;
     }
 
-    void move2head(const size_type& off_pos)
+    void move2head()
     {
-        if (off_pos == 0)
-        {
-            return;
-        }
-        if (off_pos >= size_)
-        {
-            size_ = 0;
-            curr_ = 0;
-        }
-        else // there is no off_pos == 0
-        {
-            size_ = size_ - off_pos;
-            curr_ = 0;
-            memmove(const_cast<char*>(data_.data()), data() + off_pos, size_);
-        }
+        // 将当前有效数据移动到data_起始位置
+        memmove(const_cast<char*>(container_.data()), this->data(), size_);
+        // 重置偏移量
+        offset_ = 0;
     }
 
 protected:
     void expand()
     {
-        data_.reserve(data_.capacity() + per_alloc_size);
+        container_.resize(container_.size() + constant::per_alloc_size);
     }
     void shrink()
     {
-        move2head(curr_);
-        data_.reserve(std::max<size_type>(default_size, (size_ + per_alloc_size - 1) / per_alloc_size * per_alloc_size));
+        move2head();
+        container_.resize(std::max<size_type>(constant::default_size, (size_ + constant::per_alloc_size - 1) / constant::per_alloc_size * constant::per_alloc_size));
     }
 
 protected:
-    data_type data_;
-    size_type curr_;  // 数据位置
-    size_type size_;  // 数据长度
+    buff_type container_;   // 数据容器
+    size_type offset_;      // 有效数据位置
+    size_type size_;        // 有效数据长度
 };
 
 

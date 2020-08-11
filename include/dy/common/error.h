@@ -16,6 +16,8 @@ enum error_code
     error_session_stopped,      // 连接已关闭
     error_session_not_exist,    // 连接不存在
 
+    error_bad_data,             // 数据错误
+
     success_code = 0,           // 成功
 };
 }//namespace common

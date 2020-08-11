@@ -49,7 +49,10 @@ public:
     {
     }
 
-    virtual ~session();
+    virtual ~session()
+    {
+        std::cout << __FUNCTION__ << std::endl;
+    }
 
     virtual void start() = 0;
     
@@ -57,9 +60,9 @@ public:
     
     virtual bool stopped() = 0;
 
-    virtual const std::string local_endpoint() const = 0;
+    virtual const std::string local_endpoint() = 0;
 
-    virtual const std::string remote_endpoint() const = 0;
+    virtual const std::string remote_endpoint() = 0;
 
     const sessionid_type& session_id() const
     {
@@ -121,7 +124,7 @@ public:
 
     virtual ~socket_session()
     {
-
+        std::cout << __FUNCTION__ << std::endl;
     }
 
     void set_options(const int& send_timeout = 30, const int& recv_timeout = 30, const int& heartbeat_interval = 10, const std::string& heartbeat_data = "")
@@ -136,9 +139,15 @@ public:
     {
         // 启动接收/发送链
         handle_recv();
-        recv_deadline_.async_wait(std::bind(&socket_session<TSocket, TBuffer>::check_deadline, std::dynamic_pointer_cast<socket_session<TSocket, TBuffer>>(shared_from_this()), std::ref(recv_deadline_)));
+        if (recv_timeout_ > 0)
+        {
+            recv_deadline_.async_wait(std::bind(&socket_session<TSocket, TBuffer>::check_deadline, std::dynamic_pointer_cast<socket_session<TSocket, TBuffer>>(shared_from_this()), std::ref(recv_deadline_)));
+        }
         handle_send();
-        send_deadline_.async_wait(std::bind(&socket_session<TSocket, TBuffer>::check_deadline, std::dynamic_pointer_cast<socket_session<TSocket, TBuffer>>(shared_from_this()), std::ref(send_deadline_)));
+        if (send_timeout_ > 0)
+        {
+            send_deadline_.async_wait(std::bind(&socket_session<TSocket, TBuffer>::check_deadline, std::dynamic_pointer_cast<socket_session<TSocket, TBuffer>>(shared_from_this()), std::ref(send_deadline_)));
+        }
     }
     
     virtual void stop() override
@@ -151,7 +160,31 @@ public:
         return !socket_.is_open();
     }
 
-    const std::string local_endpoint() const override
+    int async_send(const char* data, const buffer::size_type& length)
+    {
+        if (!data || length == 0 /*|| length > max_packet_length*/)
+        {
+            return common::error_bad_data;
+        }
+        if (stopped())
+        {
+            return common::error_session_stopped;
+        }
+        lock_guard_type lk(mutex_);
+        if (send_queue_capacity_ == 0 || send_queue_.size() < send_queue_capacity_)
+        {
+            send_queue_.emplace(std::make_shared<buffer>(data, length));
+            non_empty_send_queue_.expires_at(time_point_type::min());
+
+            return common::success_code;
+        }
+        else
+        {
+            return common::error_queue_full;
+        }
+    }
+
+    const std::string local_endpoint() override
     {
         lock_guard_type lk(mutex_);
         if (socket_.is_open())
@@ -164,7 +197,7 @@ public:
         }
     }
 
-    const std::string remote_endpoint() const override
+    const std::string remote_endpoint() override
     {
         lock_guard_type lk(mutex_);
         if (socket_.is_open())
@@ -178,18 +211,24 @@ public:
     }
 
 private:
-    void handle_stop()
+    void handle_stop(const int& error, const std::string& message)
     {
         if (func_disconnect_callback_)
         {
-            func_disconnect_callback_(session_id(), 0, "");
+            func_disconnect_callback_(session_id(), error, message);
         }
-        lock_guard_type lk(mutex_);
-        if (socket_.is_open())
         {
-            boost::system::error_code ec;
-            socket_.close(ec);
+            lock_guard_type lk(mutex_);
+            if (socket_.is_open())
+            {
+                boost::system::error_code ec;
+                socket_.close(ec);
+            }
         }
+        recv_deadline_.cancel();
+        send_deadline_.cancel();
+        non_empty_send_queue_.cancel();
+        heartbeat_timer_.cancel();
     }
 
     void handle_recv()
@@ -199,7 +238,10 @@ private:
         {
             return;
         }
-        recv_deadline_.expires_after(asio::chrono::seconds(recv_timeout_));
+        if (recv_timeout_ > 0)
+        {
+            recv_deadline_.expires_after(asio::chrono::seconds(recv_timeout_));
+        }
         async_recv();
     }
 
@@ -212,6 +254,16 @@ private:
                 // 更新接收缓存有效长度
                 recv_buffer_.set_size(recv_buffer_.size() + bytes_transferred);
 
+                {
+                    std::string buff(recv_buffer_.data(), recv_buffer_.size());
+                    std::cout << __FUNCTION__ << " recv_buffer_.size=" << recv_buffer_.size() << " ";
+                    for (net::buffer::size_type i = 0; i < buff.length(); ++i)
+                    {
+                        std::cout << buff[i] << " ";
+                    }
+                    std::cout << std::endl;
+                }
+
                 while (true)
                 {
                     // 解析接收缓存数据
@@ -221,13 +273,13 @@ private:
                     if (parse_result == common::error_packet_bad)
                     {
                         // 解包异常 停止
-                        handle_stop();
+                        handle_stop(common::error_packet_bad, "parse error");
                         break;
                     }
                     else if (parse_result == common::error_packet_less)
                     {
                         // 整理缓存 继续解包
-                        recv_buffer_.move_to_head(parse_result);
+                        recv_buffer_.move2head();
                         // 不足一包 继续接收
                         handle_recv();
                         break;
@@ -246,7 +298,7 @@ private:
             else
             {
                 // 接收异常 停止
-                handle_stop();
+                handle_stop(-1, "recv error");
             }
         });
     }
@@ -262,13 +314,19 @@ private:
                 non_empty_send_queue_.expires_at(time_point_type::max());
                 non_empty_send_queue_.async_wait(std::bind(&socket_session<TSocket, TBuffer>::handle_send, std::dynamic_pointer_cast<socket_session<TSocket, TBuffer>>(shared_from_this())));
                 // 设置心跳定时器
-                heartbeat_timer_.expires_after(asio::chrono::seconds(heartbeat_interval_));
-                heartbeat_timer_.async_wait(std::bind(&socket_session<TSocket, TBuffer>::check_heartbeat, std::dynamic_pointer_cast<socket_session<TSocket, TBuffer>>(shared_from_this())));
+                if (heartbeat_interval_ > 0 && !heartbeat_data_.empty())
+                {
+                    heartbeat_timer_.expires_after(asio::chrono::seconds(heartbeat_interval_));
+                    heartbeat_timer_.async_wait(std::bind(&socket_session<TSocket, TBuffer>::check_heartbeat, std::dynamic_pointer_cast<socket_session<TSocket, TBuffer>>(shared_from_this())));
+                }
             }
             else
             {
                 // 发送数据
-                send_deadline_.expires_after(asio::chrono::seconds(send_timeout_));
+                if (send_timeout_ > 0)
+                {
+                    send_deadline_.expires_after(asio::chrono::seconds(send_timeout_));
+                }
                 async_send();
             }
         }
@@ -288,9 +346,45 @@ private:
             else
             {
                 // 发送异常 停止
-                handle_stop();
+                handle_stop(-1, "send error");
             }
         });
+    }
+
+    void check_deadline(timer_type &deadline)
+    {
+        std::cout << __FUNCTION__ << std::endl;
+        if (!stopped())
+        {
+            if (deadline.expiry() <= timer_type::clock_type::now())
+            {
+                // 超时 不调用handle_stop() 关闭socket由接收发送响应来调用关闭
+                lock_guard_type guard(mutex_);
+                if (socket_.is_open())
+                {
+                    boost::system::error_code ec;
+                    socket_.close(ec);
+                }
+            }
+            else
+            {
+                // 挂起 继续
+                deadline.async_wait(std::bind(&socket_session<TSocket, TBuffer>::check_deadline, std::dynamic_pointer_cast<socket_session<TSocket, TBuffer>>(shared_from_this()), std::ref(deadline)));
+            }
+        }
+    }
+
+    void check_heartbeat()
+    {
+        std::cout << __FUNCTION__ << std::endl;
+        if (!stopped())
+        {
+            if (heartbeat_timer_.expiry() <= timer_type::clock_type::now())
+            {
+                // 超时 发送心跳
+                async_send(heartbeat_data_.c_str(), heartbeat_data_.length());
+            }
+        }
     }
 };
 
