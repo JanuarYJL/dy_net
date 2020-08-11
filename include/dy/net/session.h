@@ -261,7 +261,7 @@ private:
                     if (pack_size == common::error_code::packet_error)
                     {
                         // 解包异常 停止
-                        handle_stop(common::error_code::packet_error, "parse error");
+                        handle_stop(common::error_code::packet_error, "parse failed");
                         break;
                     }
                     else if (pack_size == common::error_code::packet_less)
@@ -286,7 +286,7 @@ private:
             else
             {
                 // 接收异常 停止
-                handle_stop(-1, "recv error");
+                handle_stop(ec.value(), ec.message());
             }
         });
     }
@@ -336,7 +336,7 @@ private:
             else
             {
                 // 发送异常 停止
-                handle_stop(-1, "send error");
+                handle_stop(ec.value(), ec.message());
             }
         });
     }
