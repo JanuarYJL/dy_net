@@ -54,9 +54,14 @@ public:
         return size_;
     }
 
-    void set_size(const size_type& size)
+    bool empty() const
     {
-        size_ = size;
+        return size_ == 0;
+    }
+
+    void push_cache(const size_type& size)
+    {
+        size_ += size;
     }
 
     void pop_cache(const size_type& size)

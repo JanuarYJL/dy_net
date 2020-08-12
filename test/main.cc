@@ -7,32 +7,44 @@ using namespace dy;
 net::tcp_session::sessionid_type global_sessionid_ = 0;
 std::map<net::tcp_session::sessionid_type, std::shared_ptr<net::tcp_session>> session_map_;
 
-std::tuple<net::tcp_session::parse_type, net::buffer::size_type, int> pack_parse(const net::buffer& buf);
+std::tuple<net::tcp_session::parse_type, net::buffer::size_type, int> tcp_pack_parse(const net::buffer& buf);
 void on_receive(const net::tcp_session::sessionid_type& session_id, const int& pack_type, const char* data_buff, const net::buffer::size_type& length);
 void on_disconnect(const net::tcp_session::sessionid_type& session_id, const int& reason_code, const std::string& message);
 void on_accept(net::acceptor::socket_type socket);
 void logger(const int& type, const char* message);
 
+char data[1024] = {0};
+
 int main()
 {
-    // net::asio::io_context ioc;
-    // boost::asio::ip::udp::socket us(ioc);
-    // boost::asio::ip::tcp::socket ts(ioc);
-    // auto udp_session_sptr = std::make_shared<net::udp_session>(std::move(us), pack_parse, on_receive, on_disconnect);
-    // auto tcp_session_sptr = std::make_shared<net::tcp_session>(std::move(ts), pack_parse, on_receive, on_disconnect);
-
     std::cout << "start ... ..." << std::endl;
     net::asio::io_context ioc_;
 
+    {
+        net::tcp_socket ts(ioc_);;
+        auto ts_ptr = std::make_shared<net::tcp_session>(std::move(ts), tcp_pack_parse, on_receive, on_disconnect);
+
+        net::udp_socket us(ioc_);;
+        auto us_ptr = std::make_shared<net::udp_session>(std::move(us), tcp_pack_parse, on_receive, on_disconnect);
+    }
+
     net::acceptor acceptor_(ioc_, "0.0.0.0", "9797", on_accept);
     acceptor_.start();
+
+    std::vector<std::thread> thrds;
+    for (size_t i = 0; i < 2; i++)
+    {
+        thrds.emplace_back([&ioc_]() {
+            ioc_.run();
+        });
+    }
 
     ioc_.run();
     std::cout << "over ... ..." << std::endl;
     return 0;
 }
 
-std::tuple<net::tcp_session::parse_type, net::buffer::size_type, int> pack_parse(const net::buffer& buf)
+std::tuple<net::tcp_session::parse_type, net::buffer::size_type, int> tcp_pack_parse(const net::buffer& buf)
 {   
     using parse_type = net::tcp_session::parse_type;
     using size_type = net::buffer::size_type;
@@ -86,10 +98,16 @@ void logger(const int& type, const char* message)
 
 void on_accept(net::acceptor::socket_type socket)
 {
-    auto session_sptr = std::make_shared<net::tcp_session>(std::move(socket), pack_parse, on_receive, on_disconnect);
+    auto session_sptr = std::make_shared<net::tcp_session>(std::move(socket), tcp_pack_parse, on_receive, on_disconnect);
     session_sptr->set_session_id(++global_sessionid_);
     session_map_[session_sptr->session_id()] = session_sptr;
     //session_sptr->set_options(10, 10, 5, "heartbeat");
     //session_sptr->set_options(10, 10, 5, "");
+    //session_sptr->set_options(600, 600, 2, "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ");
     session_sptr->start();
+    for (size_t i = 0; i < 10000; i++)
+    {
+        session_sptr->async_send("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", 62);
+    }
+    
 }

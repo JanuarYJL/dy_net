@@ -241,17 +241,17 @@ private:
         {
             recv_deadline_.expires_after(asio::chrono::seconds(recv_timeout_));
         }
-        async_recv();
+        handle_async_recv();
     }
 
-    void async_recv()
+    void handle_async_recv()
     {
         auto self_ = std::dynamic_pointer_cast<socket_session<TSocket, TBuffer>>(shared_from_this());
-        socket_.async_read_some(asio::buffer(recv_buffer_.writable_buff(), recv_buffer_.writable_size()), [this, self_](std::error_code ec, std::size_t bytes_transferred) {
+        socket_.async_receive(asio::buffer(recv_buffer_.writable_buff(), recv_buffer_.writable_size()), [this, self_](std::error_code ec, std::size_t bytes_transferred) {
             if (!ec)
             {
                 // 更新接收缓存有效长度
-                recv_buffer_.set_size(recv_buffer_.size() + bytes_transferred);
+                recv_buffer_.push_cache(bytes_transferred);
 
                 while (true)
                 {
@@ -301,7 +301,7 @@ private:
         }
 
         lock_guard_type lk(mutex_);
-        if (send_queue_.empty())
+        if ((!send_buff_ptr_ || send_buff_ptr_->empty()) && send_queue_.empty())
         {
             // 无数据时挂起等待数据
             non_empty_send_queue_.expires_at(time_point_type::max());
@@ -320,18 +320,23 @@ private:
             {
                 send_deadline_.expires_after(asio::chrono::seconds(send_timeout_));
             }
-            async_send();
+            handle_async_send();
         }
     }
 
-    void async_send()
+    void handle_async_send()
     {
         auto self_ = std::dynamic_pointer_cast<socket_session<TSocket, TBuffer>>(shared_from_this());
-        send_buff_ptr_ = send_queue_.front();
-        send_queue_.pop();
-        asio::async_write(socket_, asio::buffer(send_buff_ptr_->data(), send_buff_ptr_->size()), [this, self_](std::error_code ec, std::size_t bytes_transferred) {
+        if (!send_buff_ptr_ || send_buff_ptr_->empty())
+        {
+            send_buff_ptr_ = send_queue_.front();
+            send_queue_.pop();
+        }
+        // 这里使用async_send是为了支持asio::ip::udp::socket，否则使用asio::async_write代码更简洁
+        socket_.async_send(asio::buffer(send_buff_ptr_->data(), send_buff_ptr_->size()), [this, self_](std::error_code ec, std::size_t bytes_transferred) {
             if (!ec)
             {
+                send_buff_ptr_->pop_cache(bytes_transferred);
                 // 继续检测 发送
                 handle_send();
             }
