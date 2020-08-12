@@ -7,6 +7,7 @@ using namespace dy;
 net::tcp_session::sessionid_type global_sessionid_ = 0;
 std::map<net::tcp_session::sessionid_type, std::shared_ptr<net::tcp_session>> session_map_;
 
+std::tuple<net::tcp_session::parse_type, net::buffer::size_type, int> pack_parse(const net::buffer& buf);
 void on_receive(const net::tcp_session::sessionid_type& session_id, const int& pack_type, const char* data_buff, const net::buffer::size_type& length);
 void on_disconnect(const net::tcp_session::sessionid_type& session_id, const int& reason_code, const std::string& message);
 void on_accept(net::acceptor::socket_type socket);
@@ -14,6 +15,12 @@ void logger(const int& type, const char* message);
 
 int main()
 {
+    // net::asio::io_context ioc;
+    // boost::asio::ip::udp::socket us(ioc);
+    // boost::asio::ip::tcp::socket ts(ioc);
+    // auto udp_session_sptr = std::make_shared<net::udp_session>(std::move(us), pack_parse, on_receive, on_disconnect);
+    // auto tcp_session_sptr = std::make_shared<net::tcp_session>(std::move(ts), pack_parse, on_receive, on_disconnect);
+
     std::cout << "start ... ..." << std::endl;
     net::asio::io_context ioc_;
 
@@ -25,8 +32,9 @@ int main()
     return 0;
 }
 
-std::tuple<net::buffer::size_type, int> pack_parse(const net::buffer& buf)
+std::tuple<net::tcp_session::parse_type, net::buffer::size_type, int> pack_parse(const net::buffer& buf)
 {   
+    using parse_type = net::tcp_session::parse_type;
     using size_type = net::buffer::size_type;
     const size_type head_size = 1;
     if (buf.size() >= head_size)
@@ -37,21 +45,21 @@ std::tuple<net::buffer::size_type, int> pack_parse(const net::buffer& buf)
             size_type need_len = len_char - '0' + head_size;
             if (buf.size() >= need_len)
             {
-                return std::make_tuple(need_len, 0);
+                return std::make_tuple(parse_type::good, need_len, 0);
             }
             else
             {
-                return std::make_tuple(common::error_code::packet_less, 0);
+                return std::make_tuple(parse_type::less, 0, 0);
             }
         }
         else
         {
-            return std::make_tuple(common::error_code::packet_error, 0);
+            return std::make_tuple(parse_type::bad, 0, 0);
         }
     }
     else
     {
-        return std::make_tuple(common::error_code::packet_less, 0);
+        return std::make_tuple(parse_type::less, 0, 0);
     }
 }
 

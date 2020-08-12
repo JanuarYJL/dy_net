@@ -29,7 +29,8 @@ public:
     using timer_type = asio::steady_timer;
     using time_point_type = timer_type::time_point;
 
-    using func_pack_parse_type = std::function<std::tuple<buffer::size_type /*pack length*/, int /*pack type*/>(const buffer&)>;
+    enum parse_type { good, /*解析成功*/  bad, /*解析出错*/  less, /*缺少数据*/  indeterminate, /*尚未明确*/ };
+    using func_pack_parse_type = std::function<std::tuple<parse_type /*parse type*/, buffer::size_type /*pack length*/, int /*pack type*/>(const buffer&)>;
     using func_receive_cb_type = std::function<void(const sessionid_type& /*session id*/, const int& /*pack type*/, const char* /*data buff*/, const buffer::size_type& /*length*/)>;
     using func_disconn_cb_type = std::function<void(const sessionid_type& /*session id*/, const int& /*reason code*/, const std::string& /*message*/)>;
     using func_log_type        = std::function<void(const int& /*type*/, const char* /*message*/)>;
@@ -255,16 +256,17 @@ private:
                 while (true)
                 {
                     // 解析接收缓存数据
+                    parse_type result = parse_type::indeterminate;
                     int pack_type = 0;
                     int pack_size = 0;
-                    std::tie(pack_size, pack_type) = func_pack_parse_method_(recv_buffer_);
-                    if (pack_size == common::error_code::packet_error)
+                    std::tie(result, pack_size, pack_type) = func_pack_parse_method_(recv_buffer_);
+                    if (result == parse_type::bad || result == parse_type::indeterminate)
                     {
                         // 解包异常 停止
                         handle_stop(common::error_code::packet_error, "parse failed");
                         break;
                     }
-                    else if (pack_size == common::error_code::packet_less)
+                    else if (result == parse_type::less)
                     {
                         // 整理缓存 继续解包
                         recv_buffer_.move2head();
@@ -272,7 +274,7 @@ private:
                         handle_recv();
                         break;
                     }
-                    else
+                    else/*if (result == parse_type::good)*/
                     {
                         // 将解析出的包回调给业务层
                         if (func_receive_callback_)
