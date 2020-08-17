@@ -301,38 +301,47 @@ private:
         }
 
         lock_guard_type lk(mutex_);
-        if ((!send_buff_ptr_ || send_buff_ptr_->empty()) && send_queue_.empty())
+
+        if (send_buff_ptr_ && !send_buff_ptr_->empty())
         {
-            // 无数据时挂起等待数据
-            non_empty_send_queue_.expires_at(time_point_type::max());
-            non_empty_send_queue_.async_wait(std::bind(&socket_session<TSocket, TBuffer>::handle_send, std::dynamic_pointer_cast<socket_session<TSocket, TBuffer>>(shared_from_this())));
-            // 设置心跳定时器
-            if (heartbeat_interval_ > 0 && !heartbeat_data_.empty())
-            {
-                heartbeat_timer_.expires_after(asio::chrono::seconds(heartbeat_interval_));
-                heartbeat_timer_.async_wait(std::bind(&socket_session<TSocket, TBuffer>::check_heartbeat, std::dynamic_pointer_cast<socket_session<TSocket, TBuffer>>(shared_from_this())));
-            }
+            // 缓存数据未发完时继续发送
+            handle_async_send();
         }
         else
         {
-            // 发送数据
-            if (send_timeout_ > 0)
+            // 缓存发送完则判断发送队列
+            if (send_queue_.empty())
             {
-                send_deadline_.expires_after(asio::chrono::seconds(send_timeout_));
+                // 无数据时挂起等待数据
+                non_empty_send_queue_.expires_at(time_point_type::max());
+                non_empty_send_queue_.async_wait(std::bind(&socket_session<TSocket, TBuffer>::handle_send, std::dynamic_pointer_cast<socket_session<TSocket, TBuffer>>(shared_from_this())));
+                // 设置心跳定时器
+                if (heartbeat_interval_ > 0 && !heartbeat_data_.empty())
+                {
+                    heartbeat_timer_.expires_after(asio::chrono::seconds(heartbeat_interval_));
+                    heartbeat_timer_.async_wait(std::bind(&socket_session<TSocket, TBuffer>::check_heartbeat, std::dynamic_pointer_cast<socket_session<TSocket, TBuffer>>(shared_from_this())));
+                }
             }
-            handle_async_send();
+            else
+            {
+                // 设置发送超时
+                if (send_timeout_ > 0)
+                {
+                    send_deadline_.expires_after(asio::chrono::seconds(send_timeout_));
+                }
+                // 取队列数据并发送
+                send_buff_ptr_ = send_queue_.front();
+                send_queue_.pop();
+                handle_async_send();
+            }
         }
     }
 
     void handle_async_send()
     {
         auto self_ = std::dynamic_pointer_cast<socket_session<TSocket, TBuffer>>(shared_from_this());
-        if (!send_buff_ptr_ || send_buff_ptr_->empty())
-        {
-            send_buff_ptr_ = send_queue_.front();
-            send_queue_.pop();
-        }
-        // 这里使用async_send是为了支持asio::ip::udp::socket，否则使用asio::async_write代码更简洁
+        // 这里使用async_send是为了支持asio::ip::udp::socket，否则使用asio::async_write()可以保证一次性发完才响应代码更简洁
+        // TODO:后续可以看下asio的condition设置发送结束条件达到与asio::async_write()相同的效果，暂时先判断缓存buffer剩余数据
         socket_.async_send(asio::buffer(send_buff_ptr_->data(), send_buff_ptr_->size()), [this, self_](std::error_code ec, std::size_t bytes_transferred) {
             if (!ec)
             {
