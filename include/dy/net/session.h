@@ -36,7 +36,7 @@ public:
     using func_log_type        = std::function<void(const int& /*type*/, const char* /*message*/)>;
 
 protected:
-    sessionid_type session_id_;
+    sessionid_type session_id_{0};
 
     func_pack_parse_type func_pack_parse_method_;
     func_receive_cb_type func_receive_callback_;
@@ -124,6 +124,7 @@ public:
 
     virtual ~socket_session()
     {
+        stop();
     }
 
     void set_options(const int& send_timeout = 30, const int& recv_timeout = 30, const int& heartbeat_interval = 10, const std::string& heartbeat_data = "")
@@ -151,7 +152,7 @@ public:
     
     virtual void stop() override
     {
-
+        handle_stop(common::error_code::normal_error, "active close");
     }
     
     virtual bool stopped() override
@@ -210,24 +211,39 @@ public:
     }
 
 private:
+    void terminate_and_clear()
+    {
+        // 终止计时器
+        recv_deadline_.cancel();
+        send_deadline_.cancel();
+        non_empty_send_queue_.cancel();
+        heartbeat_timer_.cancel();
+        // 清空缓存
+        recv_buffer_.clear();
+        queue_type temp_queue;
+        send_queue_.swap(temp_queue);
+        send_buff_ptr_ = nullptr;
+        // 重置设置
+        set_options();
+    }
+
     void handle_stop(const int& error, const std::string& message)
     {
-        if (func_disconnect_callback_)
-        {
-            func_disconnect_callback_(session_id(), error, message);
-        }
         {
             lock_guard_type lk(mutex_);
+            if (func_disconnect_callback_)
+            {
+                func_disconnect_callback_(session_id(), error, message);
+                func_disconnect_callback_ = nullptr; // 只响应一次断开回调
+            }
             if (socket_.is_open())
             {
                 boost::system::error_code ec;
                 socket_.close(ec);
             }
         }
-        recv_deadline_.cancel();
-        send_deadline_.cancel();
-        non_empty_send_queue_.cancel();
-        heartbeat_timer_.cancel();
+        // 终止并清理缓存
+        terminate_and_clear();
     }
 
     void handle_recv()
@@ -260,11 +276,14 @@ private:
                     int pack_type = 0;
                     int pack_size = 0;
                     std::tie(result, pack_size, pack_type) = func_pack_parse_method_(recv_buffer_);
-                    if (result == parse_type::bad || result == parse_type::indeterminate)
+                    if (result == parse_type::good)
                     {
-                        // 解包异常 停止
-                        handle_stop(common::error_code::packet_error, "parse failed");
-                        break;
+                        // 将解析出的包回调给业务层
+                        if (func_receive_callback_)
+                        {
+                            func_receive_callback_(session_id(), pack_type, recv_buffer_.data(), pack_size);
+                        }
+                        recv_buffer_.pop_cache(pack_size);
                     }
                     else if (result == parse_type::less)
                     {
@@ -274,14 +293,11 @@ private:
                         handle_recv();
                         break;
                     }
-                    else/*if (result == parse_type::good)*/
+                    else /*(result == parse_type::bad || result == parse_type::indeterminate)*/
                     {
-                        // 将解析出的包回调给业务层
-                        if (func_receive_callback_)
-                        {
-                            func_receive_callback_(session_id(), pack_type, recv_buffer_.data(), pack_size);
-                        }
-                        recv_buffer_.pop_cache(pack_size);
+                        // 解包异常 停止
+                        handle_stop(common::error_code::packet_error, "parse failed");
+                        break;
                     }
                 }
             }

@@ -70,6 +70,12 @@ public:
         size_ -= size;
     }
 
+    void clear()
+    {
+        offset_ = 0;
+        size_ = 0;
+    }
+
     char* writable_buff()
     {
         if (container_.size() <= offset_ + size_)

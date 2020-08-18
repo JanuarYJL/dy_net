@@ -1,6 +1,7 @@
 #include <iostream>
 #include "net/acceptor.h"
 #include "net/connector.h"
+#include "net/client.h"
 
 using namespace dy;
 
@@ -20,12 +21,26 @@ int main()
     std::cout << "start ... ..." << std::endl;
     net::asio::io_context ioc_;
 
-    {
-        net::tcp_socket ts(ioc_);;
-        auto ts_ptr = std::make_shared<net::tcp_session>(std::move(ts), tcp_pack_parse, on_receive, on_disconnect);
+    // {
+    //     net::tcp_socket ts(ioc_);;
+    //     auto ts_ptr = std::make_shared<net::tcp_session>(std::move(ts), tcp_pack_parse, on_receive, on_disconnect);
 
-        net::udp_socket us(ioc_);;
-        auto us_ptr = std::make_shared<net::udp_session>(std::move(us), tcp_pack_parse, on_receive, on_disconnect);
+    //     net::udp_socket us(ioc_);;
+    //     auto us_ptr = std::make_shared<net::udp_session>(std::move(us), tcp_pack_parse, on_receive, on_disconnect);
+    // }
+
+    {
+        auto tc_ptr = std::make_shared<net::tcp_client>(ioc_);
+        tc_ptr->set_endpoint("172.16.9.11", "20100");
+        tc_ptr->set_callback(tcp_pack_parse, on_receive, on_disconnect);
+        tc_ptr->set_options("login test ~~~", true, "heart beat ~~~", 3, 10, 0);
+        tc_ptr->connect();
+        // for (int i = 0; i < 3; ++i)
+        // {
+        //     std::thread thrd([&ioc_]() { ioc_.run(); });
+        //     thrd.detach();
+        // }
+        ioc_.run();
     }
 
     net::acceptor acceptor_(ioc_, "0.0.0.0", "9797", on_accept);
