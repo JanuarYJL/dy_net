@@ -33,14 +33,67 @@ int main()
         auto tc_ptr = std::make_shared<net::tcp_client>(ioc_);
         tc_ptr->set_endpoint("172.16.9.11", "20100");
         tc_ptr->set_callback(tcp_pack_parse, on_receive, on_disconnect);
-        tc_ptr->set_options("login test ~~~", true, "heart beat ~~~", 3, 10, 0);
+        tc_ptr->set_options("login test ~~~", true, "heart beat ~~~", 2, 8, 0);
         tc_ptr->connect();
-        // for (int i = 0; i < 3; ++i)
-        // {
-        //     std::thread thrd([&ioc_]() { ioc_.run(); });
-        //     thrd.detach();
-        // }
+
+        for (int i = 0; i < 4; ++i)
+        {
+            std::thread send_thrd([tc_ptr, &ioc_]() {
+                std::string data;
+                int interval = 1;
+                while (!ioc_.stopped())
+                {
+                    // 1~8s间隔递增循环发送数据
+                    data.clear();
+                    for (int i = 0; i < interval; ++i)
+                    {
+                        data += i + '0';
+                        data += i + '0';
+                        data += i + '0';
+                    }
+                    tc_ptr->async_send(data.c_str(), data.length());
+                    std::this_thread::sleep_for(std::chrono::seconds(interval++));
+                    if (interval > 8)
+                    {
+                        interval = 1;
+                    }
+                }
+            });
+            send_thrd.detach();
+        }
+
+        for (int i = 0; i < 4; ++i)
+        {
+            std::thread disconn_thrd([tc_ptr, &ioc_]() {
+                while (!ioc_.stopped())
+                {
+                    // 20s 断线一次
+                    std::this_thread::sleep_for(std::chrono::seconds(12));
+                    tc_ptr->disconnect();
+                }
+            });
+            disconn_thrd.detach();
+        }
+
+        // std::thread close_thrd([tc_ptr, &ioc_]() {
+        //     while (!ioc_.stopped())
+        //     {
+        //         // 2min后关闭连接
+        //         std::this_thread::sleep_for(std::chrono::minutes(2));
+        //         tc_ptr->close();
+        //     }
+        // });
+        // close_thrd.detach();
+
+        // 3+1 IO工作线程
+        for (int i = 0; i < 3; ++i)
+        {
+            std::thread thrd([&ioc_]() { ioc_.run(); });
+            thrd.detach();
+        }
         ioc_.run();
+
+        return 0;
     }
 
     net::acceptor acceptor_(ioc_, "0.0.0.0", "9797", on_accept);

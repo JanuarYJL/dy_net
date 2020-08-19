@@ -37,6 +37,7 @@ public:
 
 protected:
     sessionid_type session_id_{0};
+    std::atomic_bool disconnected_{false};
 
     func_pack_parse_type func_pack_parse_method_;
     func_receive_cb_type func_receive_callback_;
@@ -129,6 +130,7 @@ public:
 
     void set_options(const int& send_timeout = 30, const int& recv_timeout = 30, const int& heartbeat_interval = 10, const std::string& heartbeat_data = "")
     {
+        lock_guard_type lk(mutex_);
         send_timeout_ = send_timeout;
         recv_timeout_ = recv_timeout;
         heartbeat_interval_ = heartbeat_interval;
@@ -137,6 +139,8 @@ public:
 
     virtual void start() override
     {
+        // 重置断开状态标识
+        disconnected_ = false;
         // 启动接收/发送链
         handle_recv();
         if (recv_timeout_ > 0)
@@ -152,7 +156,13 @@ public:
     
     virtual void stop() override
     {
-        handle_stop(common::error_code::normal_error, "active close");
+        lock_guard_type lk(mutex_);
+        //handle_stop(common::error_code::normal_error, "active close");
+        // 不直接调用handle_stop 关闭socket让连接自行释放
+        if (socket_.is_open())
+        {
+            socket_.close();
+        }
     }
     
     virtual bool stopped() override
@@ -166,11 +176,12 @@ public:
         {
             return common::error_code::normal_error;
         }
+
+        lock_guard_type lk(mutex_);
         if (stopped())
         {
             return common::error_code::session_stopped;
         }
-        lock_guard_type lk(mutex_);
         if (send_queue_capacity_ == 0 || send_queue_.size() < send_queue_capacity_)
         {
             send_queue_.emplace(std::make_shared<buffer>(data, length));
@@ -211,39 +222,34 @@ public:
     }
 
 private:
-    void terminate_and_clear()
-    {
-        // 终止计时器
-        recv_deadline_.cancel();
-        send_deadline_.cancel();
-        non_empty_send_queue_.cancel();
-        heartbeat_timer_.cancel();
-        // 清空缓存
-        recv_buffer_.clear();
-        queue_type temp_queue;
-        send_queue_.swap(temp_queue);
-        send_buff_ptr_ = nullptr;
-        // 重置设置
-        set_options();
-    }
 
     void handle_stop(const int& error, const std::string& message)
     {
+        // 可能会在断开回调中进行重连 所以必须先响应回调
+        // 否则全部停止后io_context没有任务就会直接结束运行
+        if (!disconnected_)
+        {
+            disconnected_ = true;
+            func_disconnect_callback_(session_id(), error, message);
+        }
         {
             lock_guard_type lk(mutex_);
-            if (func_disconnect_callback_)
-            {
-                func_disconnect_callback_(session_id(), error, message);
-                func_disconnect_callback_ = nullptr; // 只响应一次断开回调
-            }
             if (socket_.is_open())
             {
                 boost::system::error_code ec;
                 socket_.close(ec);
             }
+            // 终止计时器
+            recv_deadline_.cancel();
+            send_deadline_.cancel();
+            non_empty_send_queue_.cancel();
+            heartbeat_timer_.cancel();
+            // 清空缓存
+            recv_buffer_.clear();
+            queue_type temp_queue;
+            send_queue_.swap(temp_queue);
+            send_buff_ptr_ = nullptr;
         }
-        // 终止并清理缓存
-        terminate_and_clear();
     }
 
     void handle_recv()
@@ -311,13 +317,11 @@ private:
 
     void handle_send()
     {
+        lock_guard_type lk(mutex_);
         if (stopped())
         {
             return;
         }
-
-        lock_guard_type lk(mutex_);
-
         if (send_buff_ptr_ && !send_buff_ptr_->empty())
         {
             // 缓存数据未发完时继续发送
@@ -361,7 +365,13 @@ private:
         socket_.async_send(asio::buffer(send_buff_ptr_->data(), send_buff_ptr_->size()), [this, self_](std::error_code ec, std::size_t bytes_transferred) {
             if (!ec)
             {
-                send_buff_ptr_->pop_cache(bytes_transferred);
+                {
+                    lock_guard_type lk(mutex_);
+                    if (send_buff_ptr_)
+                    {
+                        send_buff_ptr_->pop_cache(bytes_transferred);
+                    }
+                }
                 // 继续检测 发送
                 handle_send();
             }
@@ -375,6 +385,7 @@ private:
 
     void check_deadline(timer_type &deadline)
     {
+        lock_guard_type lk(mutex_);
         if (stopped())
         {
             return;
@@ -382,7 +393,6 @@ private:
         if (deadline.expiry() <= timer_type::clock_type::now())
         {
             // 超时 不调用handle_stop() 关闭socket由接收发送响应来调用关闭
-            lock_guard_type guard(mutex_);
             if (socket_.is_open())
             {
                 boost::system::error_code ec;

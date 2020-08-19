@@ -58,12 +58,14 @@ public:
 
     void set_endpoint(const std::string &host, const std::string &port)
     {
+        lock_guard_type lk(mutex_);
         remote_host_ = host;
         remote_port_ = port;
     }
 
     void set_callback(func_pack_parse_type pack_parse_method, func_receive_cb_type receive_callback, func_disconn_cb_type disconnect_callback)
     {
+        lock_guard_type lk(mutex_);
         pack_parse_method_ = pack_parse_method;
         receive_callback_ = receive_callback;
         disconnect_callback_ = disconnect_callback;
@@ -73,6 +75,7 @@ public:
                      const std::string &heartbeat_data = "", const int &heartbeat_interval = 10, 
                      const int &send_timeout = 30, const int &recv_timeout = 30)
     {
+        lock_guard_type lk(mutex_);
         login_data_ = login_data;
         auto_reconnect_ = auto_reconnect;
         heart_data_ = heartbeat_data;
@@ -83,12 +86,13 @@ public:
 
     void connect()
     {
-        // 原连接未关闭 不继续连接
+        lock_guard_type lk(mutex_);
+        // 关闭原连接
         if (session_ptr_ && !session_ptr_->stopped())
         {
             session_ptr_->stop();
         }
-        // socket未关闭则先关掉
+        // 关闭原socket
         if (socket_.is_open())
         {
             boost::system::error_code ec;
@@ -104,11 +108,14 @@ public:
         else
         {
             //UtilityBoostLogger(info) << "connect failed, remote_addr:" << remote_host_ << "/" << remote_port_;
+            //int iii = 0;
         }
     }
 
     void disconnect()
     {
+        lock_guard_type lk(mutex_);
+
         if (session_ptr_ && !session_ptr_->stopped())
         {
             session_ptr_->stop();
@@ -124,7 +131,21 @@ public:
     {
         // 设置不重连
         auto_reconnect_ = false;
-        // 关闭当前连接
+        // 断开当前连接
+        disconnect();
+    }
+
+    int async_send(const char* data, const buffer::size_type& length)
+    {
+        lock_guard_type lk(mutex_);
+        if (session_ptr_)
+        {
+            return session_ptr_->async_send(data, length);
+        }
+        else
+        {
+            return common::error_code::session_not_exist;
+        }
     }
 
 private:
@@ -132,6 +153,7 @@ private:
     {
         try
         {
+            lock_guard_type lk(mutex_);
             // 连接成功
             if (!ec)
             {
@@ -156,7 +178,7 @@ private:
             else
             {
                 //UtilityBoostLogger(info) << "connect failed, error_code:" << ec;
-                // 延迟5s进行重连
+                // 连接失败时延迟5s进行重连
                 auto _self = this->shared_from_this();
                 auto delay_timer = std::make_shared<timer_type>(ioc_);
                 delay_timer->expires_after(asio::chrono::seconds(5));
@@ -174,7 +196,11 @@ private:
         disconnect_callback_(session_id, reason_code, message);
         if (auto_reconnect_)
         {
-            ioc_.post([this]() { connect(); });
+            // 断开连接时延迟2s进行重连
+            auto _self = this->shared_from_this();
+            auto delay_timer = std::make_shared<timer_type>(ioc_);
+            delay_timer->expires_after(asio::chrono::seconds(2));
+            delay_timer->async_wait(std::bind([this, delay_timer, _self]() { connect(); }));
         }
     }
 };
@@ -183,7 +209,7 @@ private:
 // TCP
 using tcp_client = dy::net::socket_client<tcp_session, asio::ip::tcp::resolver>;
 // UDP
-//using udp_client = dy::net::socket_client<udp_session, asio::ip::udp::resolver>;
+using udp_client = dy::net::socket_client<udp_session, asio::ip::udp::resolver>;
 
 } // namespace net
 } // namespace dy
