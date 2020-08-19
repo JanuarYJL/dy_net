@@ -207,9 +207,9 @@ private:
 
 // explicit class declaration
 // TCP
-using tcp_client = dy::net::socket_client<tcp_session, asio::ip::tcp::resolver>;
+using tcp_client = socket_client<tcp_session, asio::ip::tcp::resolver>;
 // UDP
-using udp_client = dy::net::socket_client<udp_session, asio::ip::udp::resolver>;
+using udp_client = socket_client<udp_session, asio::ip::udp::resolver>;
 
 } // namespace net
 } // namespace dy

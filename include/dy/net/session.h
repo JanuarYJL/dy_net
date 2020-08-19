@@ -422,11 +422,11 @@ private:
 
 // explicit class declaration
 // TCP
-using tcp_socket = dy::net::asio::ip::tcp::socket;
-using tcp_session = dy::net::socket_session<tcp_socket, dy::net::buffer>;
+using tcp_socket = asio::ip::tcp::socket;
+using tcp_session = socket_session<tcp_socket, buffer>;
 // UDP
-using udp_socket = dy::net::asio::ip::udp::socket;
-using udp_session = dy::net::socket_session<udp_socket, dy::net::buffer>;
+using udp_socket = asio::ip::udp::socket;
+using udp_session = socket_session<udp_socket, buffer>;
 
 } // namespace net
 } // namespace dy
