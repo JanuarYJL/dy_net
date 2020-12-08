@@ -8,6 +8,9 @@ namespace dy
 {
 namespace net
 {
+/**
+ * @brief Client
+ */
 template<typename TSession, typename TResolver>
 class socket_client : public std::enable_shared_from_this<socket_client<TSession, TResolver>>
 {

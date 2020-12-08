@@ -7,7 +7,9 @@ namespace dy
 {
 namespace net
 {
-
+/**
+ * @brief 接收器
+ */
 class acceptor
 {
 public:

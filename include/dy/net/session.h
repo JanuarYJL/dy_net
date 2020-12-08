@@ -18,6 +18,10 @@ namespace dy
 namespace net
 {
 namespace asio = boost::asio;
+
+/**
+ * @brief Session
+ */
 class session : public std::enable_shared_from_this<session>
 {
 public:
