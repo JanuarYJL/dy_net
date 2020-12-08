@@ -21,14 +21,49 @@ int main()
     std::cout << "start ... ..." << std::endl;
     net::asio::io_context ioc_;
 
-    // {
-    //     net::tcp_socket ts(ioc_);;
-    //     auto ts_ptr = std::make_shared<net::tcp_session>(std::move(ts), tcp_pack_parse, on_receive, on_disconnect);
+    // 测试udp client
+    {
+        net::tcp_socket ts(ioc_);;
+        auto ts_ptr = std::make_shared<net::tcp_session>(std::move(ts), tcp_pack_parse, on_receive, on_disconnect);
 
-    //     net::udp_socket us(ioc_);;
-    //     auto us_ptr = std::make_shared<net::udp_session>(std::move(us), tcp_pack_parse, on_receive, on_disconnect);
-    // }
+        net::udp_socket us(ioc_);;
+        auto us_ptr = std::make_shared<net::udp_session>(std::move(us), tcp_pack_parse, on_receive, on_disconnect);
 
+        auto tc_ptr = std::make_shared<net::tcp_client>(ioc_);
+        auto uc_ptr = std::make_shared<net::udp_client>(ioc_);
+        uc_ptr->set_endpoint("172.16.9.11", "20101");
+        uc_ptr->set_callback(tcp_pack_parse, on_receive, on_disconnect);
+        uc_ptr->set_options("login test ~~~", true, "heart beat ~~~", 2, 8, 0);
+        uc_ptr->connect();
+        
+        for (int i = 0; i < 4; ++i)
+        {
+            std::thread send_thrd([uc_ptr, &ioc_]() {
+                const std::string send_data = "1!2@3#4$5%6^7&8*9(0)";
+                int interval = 1;
+                while (!ioc_.stopped())
+                {
+                    uc_ptr->async_send(send_data.c_str(), send_data.length());
+                    std::this_thread::sleep_for(std::chrono::seconds(interval++));
+                    if (interval > 8)
+                    {
+                        interval = 1;
+                    }
+                }
+            });
+            send_thrd.detach();
+        }
+        // 3+1 IO工作线程
+        for (int i = 0; i < 3; ++i)
+        {
+            std::thread thrd([&ioc_]() { ioc_.run(); });
+            thrd.detach();
+        }
+        ioc_.run();
+        return 0;
+    }
+
+    if (0)
     {
         auto tc_ptr = std::make_shared<net::tcp_client>(ioc_);
         tc_ptr->set_endpoint("172.16.9.11", "20100");
@@ -61,19 +96,19 @@ int main()
             });
             send_thrd.detach();
         }
-
-        for (int i = 0; i < 4; ++i)
-        {
-            std::thread disconn_thrd([tc_ptr, &ioc_]() {
-                while (!ioc_.stopped())
-                {
-                    // 20s 断线一次
-                    std::this_thread::sleep_for(std::chrono::seconds(12));
-                    tc_ptr->disconnect();
-                }
-            });
-            disconn_thrd.detach();
-        }
+        // 断线重连测试
+        // for (int i = 0; i < 4; ++i)
+        // {
+        //     std::thread disconn_thrd([tc_ptr, &ioc_]() {
+        //         while (!ioc_.stopped())
+        //         {
+        //             // 20s 断线一次
+        //             std::this_thread::sleep_for(std::chrono::seconds(12));
+        //             tc_ptr->disconnect();
+        //         }
+        //     });
+        //     disconn_thrd.detach();
+        // }
 
         // std::thread close_thrd([tc_ptr, &ioc_]() {
         //     while (!ioc_.stopped())
