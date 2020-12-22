@@ -20,17 +20,35 @@ add_definitions(
         -DBOOST_ALL_DYN_LINK
 )
 
-# third_party
-set(THIRD_PARTY_PATH /home/yangjl/workspace/third_party)
+# third_party/utility path
+set(THIRD_PARTY_PATH ../third_party)
+set(UTILITY_PATH ../utility)
 
 # 包含路径
 include_directories(
-        include/dy
-        ${THIRD_PARTY_PATH}/boost_1_69_0/include
+        ${UTILITY_PATH}/include/utility
+        ${THIRD_PARTY_PATH}/asio-1.12.2/include
+        ${THIRD_PARTY_PATH}/boost_1_74_0/include
+        ${THIRD_PARTY_PATH}/protobuf-3.5.1/include
+        ${THIRD_PARTY_PATH}/unixODBC-2.3.2/include
+        ${THIRD_PARTY_PATH}/jsoncpp-1.8.4/include
+        ${THIRD_PARTY_PATH}/libiconv_1_15/include
+        /usr/include/oracle/11.2/client64
+        ${THIRD_PARTY_PATH}/acl-3.5.1-8/lib_acl/include
+        ${THIRD_PARTY_PATH}/acl-3.5.1-8/lib_acl_cpp/include
+        ${THIRD_PARTY_PATH}/acl-3.5.1-8/lib_protocol/include
 )
 
-# src
-aux_source_directory(src DY_NET_SRC_FILES)
+link_directories(
+        ${UTILITY_PATH}/lib
+        ${THIRD_PARTY_PATH}/boost_1_74_0/lib
+        ${THIRD_PARTY_PATH}/protobuf-3.5.1/lib
+        ${THIRD_PARTY_PATH}/unixODBC-2.3.2/lib
+        ${THIRD_PARTY_PATH}/jsoncpp-1.8.4/lib
+        ${THIRD_PARTY_PATH}/libiconv_1_15/lib
+        /usr/lib/oracle/11.2/client64/lib/
+        ${THIRD_PARTY_PATH}/acl-3.5.1-8
+)
 
 # out dir
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_DEBUG ${CMAKE_SOURCE_DIR}/lib/debug)
@@ -40,8 +58,5 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_RELEASE ${CMAKE_SOURCE_DIR}/lib/release)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_RELEASE ${CMAKE_SOURCE_DIR}/lib/release)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_SOURCE_DIR}/bin/release)
 
-# library
-add_library(dy_net ${DY_NET_SRC_FILES})
-
-
-add_subdirectory(test)
+# sub dir
+add_subdirectory(test_util)
