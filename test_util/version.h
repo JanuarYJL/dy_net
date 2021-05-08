@@ -1,0 +1,27 @@
+#ifndef DCACHE_FORMULA_DCACHE_SERVER_VERSION_H
+#define DCACHE_FORMULA_DCACHE_SERVER_VERSION_H
+
+#define APP_NAME "底层库测试"
+#define COMPANY_NAME "文华财经"
+#define COMMENTS "底层库测试"
+
+#define EXEC_UNIQUE_PID_FILE "run_unique_pid.file"
+
+#define VERSION_MAJOR  0
+#define VERSION_MINOR  0
+#define VERSION_REVISION  1
+#define VERSION_BUILD  1
+
+#define __M_TOSTR(v) #v
+#define __M_VER_JOIN(major, minor, revision) __M_TOSTR(major.minor.revision)
+#define __M_VER_JOIN_COMP(major, minor, revision, build) __M_TOSTR(major.minor.revision.build)
+#define VERSION_TEXT __M_VER_JOIN(VERSION_MAJOR,VERSION_MINOR,VERSION_REVISION)
+#define VERSION_TEXT_COMP __M_VER_JOIN_COMP(VERSION_MAJOR,VERSION_MINOR,VERSION_REVISION,VERSION_BUILD)
+//#define VERSION_NUMBER  0x10000100L    // 0.00.000.00
+#define VERSION_NUMBER  MAKELONG(MAKEWORD(VERSION_MAJOR, VERSION_MINOR), VERSION_REVISION)
+
+#define BUILD_DATE __DATE__
+#define BUILD_TIME __TIME__
+#define BUILD_DATE_TIME __DATE__ " " __TIME__
+
+#endif//!DCACHE_FORMULA_DCACHE_SERVER_VERSION_H

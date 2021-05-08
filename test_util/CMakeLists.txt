@@ -1,27 +1,26 @@
-# 包含路径
-include_directories(
-        ../include/dy
-)
+# 屏蔽#pragma region/endregion报警
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas")
 
-link_directories(
-    ${THIRD_PARTY_PATH}/boost_1_69_0/lib
-    ../lib/debug
+# define
+add_definitions(
+        -DUSE_BOOST_LOGGER
 )
 
 #src files
 aux_source_directory(. TEST_SRC_FILES)
 
 #执行程序
-add_executable(test.lx ${TEST_SRC_FILES})
+add_executable(test_util.lx ${TEST_SRC_FILES})
 
 #链接使用的库
 target_link_libraries(
-    test.lx
+    test_util.lx
         #内部库
-        dy_net
+        utility
         #三方库
         boost_log
         boost_log_setup
+        boost_system
         boost_filesystem
         boost_serialization
         boost_thread
